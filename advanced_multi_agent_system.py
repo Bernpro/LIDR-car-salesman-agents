@@ -15,6 +15,7 @@ from langchain.memory import ConversationBufferWindowMemory
 
 from enhanced_inventory_manager import get_inventory_manager, CarSearchResult
 from dotenv import load_dotenv
+import re
 
 # Load environment variables
 load_dotenv()
@@ -105,21 +106,21 @@ class AdvancedCarSalesSystem:
         self.carlos_llm = ChatOpenAI(
             temperature=0.8,  # Creative for sales conversations
             openai_api_key=openai_api_key,
-            model_name="gpt-4o",  # Latest GPT-4o for advanced sales
+            model_name="gpt-5-nano",  # Supported model for advanced sales
             max_tokens=1000
         )
         
         self.maria_llm = ChatOpenAI(
             temperature=1,  # Factual for research
             openai_api_key=openai_api_key,
-            model_name="o4-mini",  # o4-mini for analytical research
+            model_name="gpt-5-mini",  # Supported analytical model
             max_tokens=800
         )
         
         self.manager_llm = ChatOpenAI(
             temperature=0.4,  # Balanced for coordination
             openai_api_key=openai_api_key,
-            model_name="gpt-4o",  # GPT-4o for intelligent coordination
+            model_name="gpt-5-nano",  # Supported coordination model
             max_tokens=600
         )
         
@@ -381,8 +382,16 @@ PROCESO DE VENTA ESTRUCTURADO (usa la herramienta UpdateSalesStage para transici
 HERRAMIENTAS DISPONIBLES (DEBES usar estas herramientas para interactuar con el sistema):
 {tools}
 
-DESCRIPCIÓN DE HERRAMIENTAS (REFERENCIA RÁPIDA):
-{tool_names}
+USO DE HERRAMIENTAS - DIRECTIVAS CLAVE:
+- `ConsultManager`: ES TU HERRAMIENTA PRINCIPAL. Úsala para TODO lo relacionado con el inventario de la concesionaria (búsquedas, disponibilidad, VINs, detalles específicos de un coche que tenemos), precios, descuentos, y directivas de venta. NO uses ResearchVehicleInfo para esto.
+- `ResearchVehicleInfo`: Úsala SOLO para obtener información externa del mercado que NO está en nuestro inventario, como reseñas de un modelo en general, comparativas con competidores, o datos de seguridad de una fuente externa.
+- `FinalizeSaleAndReserveVehicle`: Úsala ÚNICAMENTE para cerrar la venta cuando el cliente confirme la compra. NECESITAS el VIN exacto, que debes obtener con `ConsultManager`.
+
+LISTA DE NOMBRES DE HERRAMIENTAS: {tool_names}
+
+RAZONAMIENTO FLEXIBLE:
+- Si el cliente cambia de parecer (ej. pregunta por "BMWs" después de haber hablado de sedanes rojos), DEBES relajar tus criterios de búsqueda. Haz una consulta más amplia al manager (ej. "Busca BMWs seguros para familia") en lugar de mantener todos los filtros anteriores.
+- Si una herramienta te da la información que necesitas (ej. `ResearchVehicleInfo` te da los datos de seguridad), ¡úsala! Sintetiza la información y responde al cliente. No vuelvas a preguntar al manager lo mismo.
 
 CONTEXTO ACTUAL:
 Etapa de venta actual: {sales_stage}
@@ -529,27 +538,84 @@ Ahora, comienza tu respuesta siguiendo el formato Thought/Action/Action Input o 
         # Manager will be called through the decision engine
         return None
     
+    def _handle_vin_request(self, request: str) -> str:
+        """Handles requests for a vehicle's VIN."""
+        logger.info(f"🏢 Manager received VIN request: {request}")
+        # Simple extraction of a potential model name from the request.
+        # This is a heuristic and could be improved with more advanced NLP.
+        match = re.search(r'(del|de el)\s+([a-zA-Z0-9\s-]+)', request, re.IGNORECASE)
+        if not match:
+            return "No pude identificar el vehículo para buscar el VIN. Por favor, sé más específico, por ejemplo: 'Necesito el VIN del Toyota Camry 2023'."
+
+        vehicle_query = match.group(2).strip()
+        # Remove years to make the query more general for the search
+        vehicle_query = re.sub(r'\b(20\d{2})\b', '', vehicle_query).strip()
+
+        logger.info(f"🛠️ Manager extracted vehicle query for VIN search: '{vehicle_query}'")
+        
+        # Use intelligent search to find the vehicle
+        search_results = self.inventory_manager.intelligent_search(vehicle_query, max_results=1)
+        
+        if search_results:
+            vehicle = search_results[0]
+            response = f"""
+🏢 **RESPUESTA DEL MANAGER - SOLICITUD DE VIN:**
+
+He encontrado el vehículo que coincide con tu solicitud '{vehicle_query}'.
+
+- **Vehículo:** {vehicle.year} {vehicle.make} {vehicle.model}
+- **VIN:** `{vehicle.vin}`
+
+Utiliza este VIN para proceder con la reserva.
+"""
+            logger.info(f"✅ Manager found VIN {vehicle.vin} for query '{vehicle_query}'")
+            return response.strip()
+        else:
+            logger.warning(f"⚠️ Manager could not find a matching vehicle for VIN request: '{vehicle_query}'")
+            return f"No encontré un vehículo que coincida con '{vehicle_query}' en el inventario disponible. ¿Puedes verificar los detalles o buscar de nuevo?"
+
     def _manager_decision_engine(self, request: str) -> str:
         """Manager's decision-making engine for business policies"""
         logger.info(f"🏢 MANAGER CONSULTATION: {request}")
         
         request_lower = request.lower()
         
+        # VIN request
+        if 'vin' in request_lower:
+            return self._handle_vin_request(request)
+
         # Inventory search request from Carlos
         if any(keyword in request_lower for keyword in ["buscar coche", "opciones de vehículo", "inventario", "búsqueda de coches", "inventory search", "buscar en inventario"]):
             logger.info(f"🏢 Manager received inventory search request: {request}")
             # Extract the actual query part for the inventory search.
             # This is a simple heuristic; a more robust NLP approach might be needed for complex requests.
             search_query = request # Default to full request
-            # Try to be a bit smarter in extracting the query
-            if "necesito opciones de" in request_lower:
-                 search_query = request[request_lower.find("necesito opciones de") + len("necesito opciones de"):].strip()
-            elif "busca un" in request_lower:
-                 search_query = request[request_lower.find("busca un") + len("busca un"):].strip()
-            elif "buscando" in request_lower:
-                 search_query = request[request_lower.find("buscando") + len("buscando"):].strip()
-            elif "query:" in request_lower: # If Carlos explicitly passes a query
-                 search_query = request[request_lower.find("query:") + len("query:"):].strip()
+            
+            # Improved keyword extraction
+            keywords = []
+            # Extract brand names mentioned
+            brands = ['audi', 'bmw', 'mercedes', 'toyota', 'honda', 'ford', 'volkswagen', 'alfa romeo']
+            for brand in brands:
+                if brand in request_lower:
+                    keywords.append(brand)
+            
+            # Extract other meaningful terms
+            other_terms = ['seguro', 'familiar', 'bebé', 'espacioso', 'rojo', 'sedan', 'suv', 'deportivo']
+            for term in other_terms:
+                if term in request_lower:
+                    keywords.append(term)
+            
+            if keywords:
+                search_query = ' '.join(keywords)
+            else: # Fallback to original, simpler extraction if no keywords found
+                if "necesito opciones de" in request_lower:
+                     search_query = request[request_lower.find("necesito opciones de") + len("necesito opciones de"):].strip()
+                elif "busca un" in request_lower:
+                     search_query = request[request_lower.find("busca un") + len("busca un"):].strip()
+                elif "buscando" in request_lower:
+                     search_query = request[request_lower.find("buscando") + len("buscando"):].strip()
+                elif "query:" in request_lower: # If Carlos explicitly passes a query
+                     search_query = request[request_lower.find("query:") + len("query:"):].strip()
             
             if not search_query or search_query == request: # Fallback if extraction is not specific enough
                  # Try to remove common phrases if they are the whole request
@@ -637,40 +703,79 @@ Vehículos Encontrados que Coinciden (para tu referencia interna):
             return self._handle_general_consultation(request)
     
     def _handle_pricing_request(self, request: str) -> str:
-        """Handle pricing and discount requests"""
+        """Handle pricing and discount requests contextually."""
+        logger.info(f"🏢 Manager received pricing request: {request}")
+        
+        # Step 1: Try to identify the vehicle and get its price
+        vehicle_price_info = ""
+        vehicle_found = None
+        
+        # Heuristic to find a vehicle model in the request.
+        match = re.search(r'(del|de el|para el)\s+([a-zA-Z0-9\s-]+)', request, re.IGNORECASE)
+        if match:
+            vehicle_query = match.group(2).strip()
+            # Clean up query slightly to remove trailing parts of the sentence
+            vehicle_query = re.sub(r'\b(y cualquier.*)\b', '', vehicle_query, flags=re.IGNORECASE).strip()
+            
+            logger.info(f"🛠️ Manager extracted vehicle query for price search: '{vehicle_query}'")
+            search_results = self.inventory_manager.intelligent_search(vehicle_query, max_results=1)
+            
+            if search_results:
+                vehicle_found = search_results[0]
+                vehicle_price_info = f"""
+**Información de Precio Específica:**
+- **Vehículo:** {vehicle_found.year} {vehicle_found.make} {vehicle_found.model}
+- **Precio de Lista:** €{vehicle_found.price:,}
+"""
+                logger.info(f"✅ Manager found price for {vehicle_query}: €{vehicle_found.price}")
+            
+        # Step 2: Provide contextual strategy (as before)
         # Business rules for pricing
         pricing_rules = {
-            "descuento_maximo": 0.15,  # 15% max discount
-            "margen_minimo": 0.08,     # 8% minimum margin
+            "descuento_maximo": 0.15,
+            "margen_minimo": 0.08,
             "vehiculos_premium": ["Ferrari", "Lamborghini", "Rolls-Royce", "Bentley"],
-            "descuento_premium": 0.05   # 5% max for premium brands
+            "descuento_premium": 0.05
         }
         
-        response = """
-🏢 **DECISIÓN DEL MANAGER - POLÍTICA DE PRECIOS:**
+        customer_seems_price_sensitive = "caro" in request.lower() or "presupuesto" in request.lower()
+        discount_already_offered = "descuento del 10%" in request.lower() or "ofrecido el descuento" in request.lower()
+        
+        strategy = [
+            "- Enfócate en el valor y beneficios únicos del vehículo.",
+            "- Ofrece paquetes de servicios adicionales (mantenimiento, garantía extendida) para aumentar el valor percibido.",
+            "- Considera opciones de financiación atractivas como una alternativa a mayores descuentos."
+        ]
+        if customer_seems_price_sensitive and discount_already_offered:
+            strategy.append("- **Acción Específica:** Dado que el 10% no fue suficiente, puedes proponer una extensión de garantía o el primer año de mantenimiento gratuito. Si el vehículo lleva más de 6 meses en inventario, tienes autorización para un descuento de hasta el 15%, pero justifícalo bien.")
+        elif customer_seems_price_sensitive:
+            strategy.append("- **Acción Específica:** Comienza con un descuento modesto (5-7%) y mide la reacción del cliente antes de llegar al 10%. Justifica el precio con el valor.")
+        
+        strategy_str = "\\n".join(strategy)
+        
+        # Step 3: Combine price info and policy into one response
+        response = f"""
+🏢 **DECISIÓN DEL MANAGER - POLÍTICA DE PRECIOS (Contextual):**
 
-Tras analizar tu solicitud sobre precios ('{request}') y consultar nuestras directrices internas de descuentos y márgenes, te proporciono la siguiente política:
-
-📋 **Autorización de Descuentos:**
+Tras analizar tu solicitud sobre precios ('{request}'), te proporciono la siguiente guía:
+{vehicle_price_info if vehicle_price_info else "No pude encontrar un precio específico para un vehículo en tu solicitud. Proporciono la política general."}
+📋 **Autorización de Descuentos (Recordatorio):**
 - Descuento estándar autorizado: hasta 10%
-- Para descuentos mayores (10-15%): requiere justificación
-- Vehículos premium: máximo 5% de descuento
-- Vehículos con más de 6 meses en inventario: hasta 15%
+- Para descuentos mayores (10-15%): requiere justificación sólida (ej. vehículo en inventario > 6 meses, para cerrar un trato importante).
+- Vehículos premium: máximo 5% de descuento.
 
-💰 **Estrategia de Precios:**
-- Enfócate en el valor y beneficios únicos
-- Ofrece paquetes de servicios adicionales
-- Considera financiamiento atractivo como alternativa
+💰 **Estrategia de Precios Recomendada para ESTE CASO:**
+{strategy_str}
 
 ⚠️ **Restricciones:**
-- NO autorizar descuentos superiores al 15%
-- Mantener margen mínimo del 8%
-- Documentar todas las negociaciones
+- NO autorizar descuentos superiores al 15% sin mi aprobación explícita.
+- Mantener margen mínimo del 8%.
+- Documentar todas las negociaciones en tus notas.
 
-🎯 **Recomendación:** Presenta el valor completo antes de discutir precio.
-        """
+🎯 **Recomendación General:** Siempre presenta el valor completo antes de discutir el precio final.
+"""
         
-        logger.info("💼 Manager authorized pricing guidelines")
+        logger.info("💼 Manager authorized contextual pricing guidelines, including specific price if found.")
         return response.strip()
     
     def _handle_inventory_priority_request(self, request: str) -> str:
@@ -817,9 +922,9 @@ He analizado tu consulta general: "{request}".
         )
 
         try:
-            logger.info(f"🧠 Maria (o4-mini) está analizando los fragmentos de: {source_type}")
+            logger.info(f"🧠 Maria (gpt-5-mini) está analizando los fragmentos de: {source_type}")
             analytical_report = self.maria_llm.invoke(analyzer_prompt).content
-            logger.info(f"✅ Maria (o4-mini) completó el análisis.")
+            logger.info(f"✅ Maria (gpt-5-mini) completó el análisis.")
             
             # Combine with original snippets for full context if needed, or just return report
             # For now, returning the detailed report Maria generated, plus context about sources.
@@ -837,7 +942,7 @@ He analizado tu consulta general: "{request}".
             return final_report.strip()
 
         except Exception as e:
-            logger.error(f"❌ Error durante el análisis de María (o4-mini): {e}")
+            logger.error(f"❌ Error durante el análisis de María (gpt-5-mini): {e}")
             return f"""🔬 Error en el análisis de María. No se pudo procesar la información de {source_type} para la consulta: {query}.
 Fragmentos originales: {raw_search_snippets[:500]}...
 """
@@ -857,7 +962,7 @@ He realizado una búsqueda web.
 📊 **Resultados Clave Extraídos:**
 {search_results[:1000]}...
 
-💡 **Análisis de María:** (Análisis más detallado ahora se realiza en un paso previo con o4-mini)
+💡 **Análisis de María:** (Análisis más detallado ahora se realiza en un paso previo con gpt-5-mini)
 - La información ha sido recopilada de sitios web especializados y reseñas profesionales.
 
 ⚠️ **Nota:** Esta información proviene de fuentes externas.

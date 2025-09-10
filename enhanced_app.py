@@ -105,9 +105,9 @@ with st.sidebar:
     
     # Agent Type Selection
     st.markdown("**🤖 Sistema Multiagente Profesional**")
-    st.markdown("- **Carlos** (GPT-4o): Vendedor experto")
-    st.markdown("- **María** (o4-mini): Especialista en investigación")
-    st.markdown("- **Manager** (GPT-4o): Coordinador de negocio")
+    st.markdown("- **Carlos** (GPT-5-nano): Vendedor experto")
+    st.markdown("- **María** (GPT-5-mini): Especialista en investigación")
+    st.markdown("- **Edu** (GPT-5-nano): Coordinador de negocio")
     
     st.markdown("---")
     
@@ -123,7 +123,7 @@ with st.sidebar:
         value=default_openai_key,
         type="password", 
         placeholder="sk-...",
-        help="Requerida para los modelos GPT-4o y o4-mini"
+        help="Requerida para los modelos GPT-5-nano y GPT-5-mini"
     )
     serpapi_api_key = st.text_input(
         "SerpAPI Key", 
@@ -162,9 +162,9 @@ with st.sidebar:
         st.write(f"**Tipo:** {st.session_state.get('agent_type', 'Unknown')}")
         
         st.write("**Agentes Activos:**")
-        st.write("- 🎯 Carlos (GPT-4o - Ventas)")
-        st.write("- 🔍 María (o4-mini - Investigación)")
-        st.write("- 👔 Manager (GPT-4o - Coordinación)")
+        st.write("- 🎯 Carlos (GPT-5-nano - Ventas)")
+        st.write("- 🔍 María (GPT-5-mini - Investigación)")
+        st.write("- 👔 Edu (GPT-5-nano - Coordinación)")
         
         # Show system analytics if available
         if hasattr(st.session_state.agent_system, 'get_conversation_analytics'):
@@ -199,9 +199,9 @@ if not st.session_state.get('system_initialized', False):
         ### ¿Qué hace especial a este sistema?
         
         **🤖 Arquitectura Multiagente Profesional:**
-        - **Carlos** - Vendedor experto con 15 años de experiencia (GPT-4o)
-        - **María** - Especialista en investigación automotriz (o4-mini)
-        - **Manager** - Coordinador de negocio y políticas (GPT-4o)
+        - **Carlos** - Vendedor experto con 15 años de experiencia (GPT-5-nano)
+        - **María** - Especialista en investigación automotriz (GPT-5-mini)
+        - **Edu** - Coordinador de negocio y políticas (GPT-5-nano)
         
         **🔧 Capacidades Avanzadas:**
         - ✅ Búsqueda inteligente en inventario enriquecido
@@ -214,10 +214,10 @@ if not st.session_state.get('system_initialized', False):
         **📈 Flujo de Venta Profesional:**
         1. **Saludo y Rapport** - Carlos construye confianza
         2. **Descubrimiento** - Identifica necesidades del cliente
-        3. **Consulta al Manager** - Obtiene prioridades de inventario
+        3. **Consulta a Edu** - Obtiene prioridades de inventario
         4. **Presentación** - Muestra vehículos relevantes
         5. **Investigación** - María proporciona datos técnicos
-        6. **Negociación** - Manager autoriza descuentos
+        6. **Negociación** - Edu autoriza descuentos
         7. **Cierre** - Finalización profesional
         
         **🎯 Demo Script Incluido:**
@@ -239,7 +239,7 @@ else:
         if "messages" not in st.session_state:
             st.session_state.messages = []
             welcome_msg = """¡Hola! Soy **Carlos**, tu vendedor de coches personal con IA avanzada. 
-Tengo 15 años de experiencia ayudando a familias a encontrar el vehículo perfecto. Trabajo en equipo con **María** (nuestra especialista en investigación) y nuestro **Manager** para ofrecerte el mejor servicio.
+Tengo 15 años de experiencia ayudando a familias a encontrar el vehículo perfecto. Trabajo en equipo con **María** (nuestra especialista en investigación) y **Edu** (nuestro Manager) para ofrecerte el mejor servicio.
 ¿En qué puedo ayudarte hoy? ¿Buscas algo específico o quieres que te recomiende opciones basadas en tus necesidades?
 💡 *Tip: Puedes decirme cosas como "busco un coche seguro para mi familia" o "necesito un sedan rojo de menos de 2 años"*"""
             st.session_state.messages.append({
@@ -367,7 +367,7 @@ Tengo 15 años de experiencia ayudando a familias a encontrar el vehículo perfe
                     if display_columns:
                         st.dataframe(
                             inventory_df_display[display_columns].style.apply(highlight_status, axis=1), 
-                            height=300, use_container_width=True
+                            height=300, width='stretch'
                         )
                     else:
                         st.warning("Columnas de inventario no encontradas.")
@@ -411,7 +411,7 @@ with col1:
 
 with col2:
     st.markdown("**🔧 Tecnologías Utilizadas**")
-    st.markdown("GPT-4o • o4-mini • LangChain • Streamlit • Python")
+    st.markdown("GPT-5 • LangChain • Streamlit • Python")
     st.markdown("Sistema Multiagente Avanzado")
 
 with col3:
